@@ -11,8 +11,8 @@ public class PostgresMonitorService
 
     public PostgresMonitorService(IConfiguration configuration, ILogger<PostgresMonitorService> logger)
     {
-        _connectionString = configuration.GetConnectionString("PostgreSQL")
-                          ?? "Host=localhost;Database=marketdata;Username=postgres;Password=postBlack77;Port=5432";
+        _connectionString = configuration.GetConnectionString("MarketDataConnection")
+                          ?? "Host=100.112.16.115;Database=marketdata;Username=postgres;Password=postBlack77;Port=5432";
         _logger = logger;
     }
 
@@ -71,36 +71,49 @@ public class PostgresMonitorService
             await connection.OpenAsync();
 
             const string query = @"
-                SELECT 
-                    pid,
-                    usename as username,
-                    datname as database,
-                    client_addr as client_address,
-                    state,
-                    query,
-                    query_start,
-                    now() - query_start as duration,
-                    wait_event_type IS NOT NULL as waiting
-                FROM pg_stat_activity 
-                WHERE state IS NOT NULL 
-                AND datname = 'marketdata'
-                ORDER BY query_start DESC";
+            SELECT 
+                pid,
+                usename as username,
+                datname as database,
+                client_addr as client_address,
+                state,
+                query,
+                query_start,
+                (now() - query_start) as duration,
+                wait_event_type IS NOT NULL as waiting
+            FROM pg_stat_activity 
+            WHERE state IS NOT NULL 
+            AND datname = 'marketdata'
+            ORDER BY query_start DESC";
 
             using var command = new NpgsqlCommand(query, connection);
             using var reader = await command.ExecuteReaderAsync();
 
             while (await reader.ReadAsync())
             {
+                // Handle the duration as a TimeSpan
+                TimeSpan duration;
+                if (reader["duration"] != DBNull.Value)
+                {
+                    // Convert the interval to TimeSpan
+                    var interval = (TimeSpan)reader["duration"];
+                    duration = interval;
+                }
+                else
+                {
+                    duration = TimeSpan.Zero;
+                }
+
                 connections.Add(new DatabaseConnection
                 {
                     Pid = reader.GetInt32("pid"),
                     Username = reader.GetString("username"),
                     Database = reader.GetString("database"),
-                    ClientAddress = reader["client_address"] as string ?? "localhost",
+                    ClientAddress = reader["client_address"]?.ToString() ?? "localhost",
                     State = reader.GetString("state"),
                     Query = reader.GetString("query"),
                     QueryStart = reader.GetDateTime("query_start"),
-                    Duration = reader.GetTimeSpan("duration"),
+                    Duration = duration,
                     Waiting = reader.GetBoolean("waiting")
                 });
             }
@@ -112,7 +125,6 @@ public class PostgresMonitorService
 
         return connections;
     }
-
     public async Task<List<(string Table, long SizeBytes, long RowCount)>> GetTableSizesAsync()
     {
         var tableSizes = new List<(string, long, long)>();
@@ -203,7 +215,8 @@ public class PostgresMonitorService
     {
         const string query = "SELECT pg_database_size('marketdata') / (1024.0 * 1024 * 1024)";
         using var command = new NpgsqlCommand(query, connection);
-        return Convert.ToDouble(await command.ExecuteScalarAsync());
+        var result = await command.ExecuteScalarAsync();
+        return result != DBNull.Value ? Convert.ToDouble(result) : 0;
     }
 
     private async Task<(int Committed, int RolledBack)> GetTransactionStatsAsync(NpgsqlConnection connection)
@@ -238,7 +251,10 @@ public class PostgresMonitorService
     {
         const string query = @"
             SELECT 
-                sum(heap_blks_hit) / (sum(heap_blks_hit) + sum(heap_blks_read)) as ratio
+                CASE 
+                    WHEN sum(heap_blks_hit) + sum(heap_blks_read) = 0 THEN 0
+                    ELSE sum(heap_blks_hit) / (sum(heap_blks_hit) + sum(heap_blks_read)) 
+                END as ratio
             FROM pg_statio_user_tables";
 
         using var command = new NpgsqlCommand(query, connection);

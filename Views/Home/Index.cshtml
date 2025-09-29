@@ -1,0 +1,324 @@
+﻿@{
+    ViewData["Title"] = "Server Monitor Dashboard";
+}
+
+<div class="container-fluid">
+    <h1>Ubuntu Server Monitor <small class="text-muted">Web-based htop + iftop</small></h1>
+
+    <div class="row">
+        <!-- Left Column: System Overview -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">🖥️ System Overview</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <small>CPU Usage</small>
+                            <h3 id="cpu-usage">--%</h3>
+                            <div class="progress">
+                                <div id="cpu-progress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <small>Memory Usage</small>
+                            <h3 id="memory-usage">--%</h3>
+                            <div class="progress">
+                                <div id="memory-progress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <small>Disk Usage</small>
+                            <h3 id="disk-usage">--%</h3>
+                            <div class="progress">
+                                <div id="disk-progress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Process Monitor -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="mb-0">📊 Top Processes</h5>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-striped mb-0" id="process-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>PID</th>
+                                <th>User</th>
+                                <th>CPU%</th>
+                                <th>MEM%</th>
+                                <th>Command</th>
+                            </tr>
+                        </thead>
+                        <tbody id="process-list">
+                            <!-- Processes will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Services & PostgreSQL -->
+        <div class="col-md-6">
+            <!-- Service Status -->
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">🔧 Service Status</h5>
+                </div>
+                <div class="card-body">
+                    <div id="service-status" class="row">
+                        <!-- Services will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- PostgreSQL Database -->
+            <div class="card mt-3">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">🐘 PostgreSQL Database</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <small>Connections</small>
+                            <h4><span id="postgres-connections">--</span>/<span id="postgres-max-connections">--</span></h4>
+                        </div>
+                        <div class="col-md-6">
+                            <small>Database Size</small>
+                            <h4 id="postgres-size">-- GB</h4>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-4">
+                            <small>Cache Hit</small>
+                            <div id="postgres-cache-hit">--%</div>
+                        </div>
+                        <div class="col-md-4">
+                            <small>Active Locks</small>
+                            <div id="postgres-locks">--</div>
+                        </div>
+                        <div class="col-md-4">
+                            <small>Health</small>
+                            <div id="postgres-health">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Connections -->
+            <div class="card mt-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">🔗 Active Connections</h5>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Service</th>
+                                <th>Port</th>
+                                <th>Connections</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="connections-list">
+                            <!-- Connections will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alerts Section -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-warning">
+                    <h5 class="mb-0">⚠️ Active Alerts</h5>
+                </div>
+                <div class="card-body">
+                    <div id="alerts-container">
+                        <p class="text-muted">No active alerts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Real-time updates every 3 seconds
+        function updateDashboard() {
+            updateSystemStats();
+            updateProcesses();
+            updateServices();
+            updatePostgresStats();
+            updateConnections();
+            updateAlerts();
+        }
+
+        async function updateSystemStats() {
+            try {
+                const response = await fetch('/api/monitoring/current');
+                const stats = await response.json();
+
+                // Update CPU
+                document.getElementById('cpu-usage').textContent = stats.cpuUsagePercent.toFixed(1) + '%';
+                document.getElementById('cpu-progress').style.width = stats.cpuUsagePercent + '%';
+
+                // Update Memory
+                document.getElementById('memory-usage').textContent = stats.memoryUsagePercent.toFixed(1) + '%';
+                document.getElementById('memory-progress').style.width = stats.memoryUsagePercent + '%';
+
+                // Update Disk
+                document.getElementById('disk-usage').textContent = stats.diskUsagePercent.toFixed(1) + '%';
+                document.getElementById('disk-progress').style.width = stats.diskUsagePercent + '%';
+
+                // Update progress bar colors
+                updateProgressBarColor('cpu-progress', stats.cpuUsagePercent);
+                updateProgressBarColor('memory-progress', stats.memoryUsagePercent);
+                updateProgressBarColor('disk-progress', stats.diskUsagePercent);
+
+            } catch (error) {
+                console.error('Error updating system stats:', error);
+            }
+        }
+
+        async function updateProcesses() {
+            try {
+                const response = await fetch('/api/monitoring/processes?count=10');
+                const processes = await response.json();
+
+                const tbody = document.getElementById('process-list');
+                tbody.innerHTML = processes.map(p => `
+                    <tr>
+                        <td>${p.pid}</td>
+                        <td>${p.user}</td>
+                        <td><span class="badge ${getUsageClass(p.cpuUsage)}">${p.cpuUsage.toFixed(1)}%</span></td>
+                        <td><span class="badge ${getUsageClass(p.memoryUsage)}">${p.memoryUsage.toFixed(1)}%</span></td>
+                        <td><small title="${p.command}">${p.command.substring(0, 40)}${p.command.length > 40 ? '...' : ''}</small></td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error updating processes:', error);
+            }
+        }
+
+        async function updateServices() {
+            try {
+                const response = await fetch('/api/monitoring/services');
+                const services = await response.json();
+
+                const container = document.getElementById('service-status');
+                container.innerHTML = services.map(s => `
+                    <div class="col-md-4 mb-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="small">${s.name}</span>
+                            <span class="badge ${s.isActive ? 'bg-success' : 'bg-danger'}">
+                                ${s.status}
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error updating services:', error);
+            }
+        }
+
+        async function updatePostgresStats() {
+            try {
+                const statsResponse = await fetch('/api/monitoring/postgres/stats');
+                const stats = await statsResponse.json();
+
+                // Update PostgreSQL stats
+                document.getElementById('postgres-connections').textContent = stats.activeConnections;
+                document.getElementById('postgres-max-connections').textContent = stats.maxConnections;
+                document.getElementById('postgres-size').textContent = stats.databaseSizeGB.toFixed(2) + ' GB';
+                document.getElementById('postgres-cache-hit').textContent = stats.cacheHitRatio.toFixed(1) + '%';
+                document.getElementById('postgres-locks').textContent = stats.activeLocks;
+                document.getElementById('postgres-health').innerHTML =
+                    stats.activeConnections >= 0 ? '🟢 Healthy' : '🔴 Down';
+
+            } catch (error) {
+                console.error('Error updating PostgreSQL stats:', error);
+                document.getElementById('postgres-health').innerHTML = '🔴 Error';
+            }
+        }
+
+        async function updateConnections() {
+            try {
+                const response = await fetch('/api/monitoring/connections/by-service');
+                const connections = await response.json();
+
+                const tbody = document.getElementById('connections-list');
+                tbody.innerHTML = Object.entries(connections).map(([service, count]) => `
+                    <tr>
+                        <td>${service}</td>
+                        <td>${getPortForService(service)}</td>
+                        <td><span class="badge bg-info">${count}</span></td>
+                        <td>${count > 0 ? '🟢 Active' : '⚪ Idle'}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error updating connections:', error);
+            }
+        }
+
+        async function updateAlerts() {
+            try {
+                const response = await fetch('/api/monitoring/alerts?includeResolved=false');
+                const alerts = await response.json();
+
+                const container = document.getElementById('alerts-container');
+                if (alerts.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No active alerts</p>';
+                } else {
+                    container.innerHTML = alerts.map(alert => `
+                        <div class="alert alert-warning alert-dismissible fade show">
+                            <strong>${alert.type}</strong>: ${alert.message}
+                            <small class="float-end">${new Date(alert.createdAt).toLocaleString()}</small>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error updating alerts:', error);
+            }
+        }
+
+        function updateProgressBarColor(elementId, percent) {
+            const element = document.getElementById(elementId);
+            element.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+
+            if (percent < 70) element.classList.add('bg-success');
+            else if (percent < 90) element.classList.add('bg-warning');
+            else element.classList.add('bg-danger');
+        }
+
+        function getUsageClass(usage) {
+            if (usage > 70) return 'bg-danger';
+            if (usage > 40) return 'bg-warning';
+            return 'bg-success';
+        }
+
+        function getPortForService(service) {
+            const ports = {
+                'PostgreSQL': '5432',
+                'SSH': '22',
+                'MySQL': '3306',
+                'HTTP/HTTPS': '80/443',
+                'Web App': '8080'
+            };
+            return ports[service] || 'N/A';
+        }
+
+        // Update every 3 seconds
+        setInterval(updateDashboard, 3000);
+        updateDashboard(); // Initial load
+    </script>
+}

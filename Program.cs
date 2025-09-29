@@ -8,19 +8,13 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
-// Add to your services in Program.cs
-builder.Services.AddScoped<PostgresMonitorService>();
-
-// Add Npgsql if not already present
+// Database - Use PostgreSQL for your monitoring app
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("PostgreSQL")));
-
-// Database
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Custom services
 builder.Services.AddScoped<SystemMonitorService>();
+builder.Services.AddScoped<PostgresMonitorService>();
 builder.Services.AddHostedService<MonitoringBackgroundService>();
 
 var app = builder.Build();
