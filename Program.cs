@@ -10,8 +10,7 @@ builder.Services.AddControllersWithViews();
 
 // Database - Use PostgreSQL for your monitoring app
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
+    options.UseInMemoryDatabase("ServerMonitor"));
 // Custom services
 builder.Services.AddScoped<SystemMonitorService>();
 builder.Services.AddScoped<PostgresMonitorService>();
@@ -24,7 +23,9 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.EnsureCreated();
+    Console.WriteLine("✅ InMemory database initialized");
 }
+
 
 // Configure pipeline
 if (!app.Environment.IsDevelopment())
@@ -41,5 +42,14 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+
+app.MapGet("/health", () => Results.Ok(new { 
+    status = "Healthy", 
+    timestamp = DateTime.UtcNow,
+    database = "InMemory"
+}));
+
+Console.WriteLine("🚀 Server Monitor Application Started Successfully!");
 
 app.Run();

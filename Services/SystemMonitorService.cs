@@ -151,52 +151,111 @@ public class SystemMonitorService
         }
     }
 
-    public async Task<List<ProcessInfo>> GetTopProcessesAsync(int count = 10)
+  
+// Update Services/SystemMonitorService.cs
+public async Task<List<ServiceStatus>> GetServiceStatusAsync()
+{
+    var services = new List<ServiceStatus>();
+    
+    // Service name to process name mapping
+    var serviceChecks = new Dictionary<string, string>
     {
-        var processes = new List<ProcessInfo>();
+        { "nginx", "nginx" },
+        { "postgresql", "postgres" },
+        { "mysql", "mysql" },
+        { "ssh", "sshd" },
+        { "cloudflared", "cloudflared" },
+        { "wsclient.service", "wsclient" }
+    };
 
+    foreach (var service in serviceChecks)
+    {
         try
         {
+            // Use pgrep to check if process is running
             var psi = new ProcessStartInfo
             {
-                FileName = "ps",
-                Arguments = "aux --sort=-%cpu",
+                FileName = "pgrep",
+                Arguments = $"-x {service.Value}",
                 RedirectStandardOutput = true,
                 UseShellExecute = false
             };
 
             using var process = Process.Start(psi);
-            if (process == null) return processes;
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var lines = output.Split('\n').Skip(1);
-
-            foreach (var line in lines.Take(count))
+            if (process != null)
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 11)
+                await process.WaitForExitAsync();
+                var output = await process.StandardOutput.ReadToEndAsync();
+                var isRunning = !string.IsNullOrEmpty(output);
+                
+                services.Add(new ServiceStatus
                 {
-                    processes.Add(new ProcessInfo
-                    {
-                        User = parts[0],
-                        Pid = int.Parse(parts[1]),
-                        CpuUsage = double.Parse(parts[2]),
-                        MemoryUsage = double.Parse(parts[3]),
-                        Command = string.Join(" ", parts[10..])
-                    });
-                }
+                    Name = service.Key,
+                    Status = isRunning ? "active" : "inactive",
+                    IsActive = isRunning
+                });
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting process info");
+            _logger.LogWarning("Error checking service {Service}: {Message}", service.Key, ex.Message);
+            services.Add(new ServiceStatus
+            {
+                Name = service.Key,
+                Status = "unknown",
+                IsActive = false
+            });
         }
-
-        return processes;
     }
 
+    return services;
+}
+
+public async Task<List<ProcessInfo>> GetTopProcessesAsync(int count = 10)
+{
+    var processes = new List<ProcessInfo>();
+    
+    try
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "ps",
+            Arguments = "aux --sort=-%cpu",
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        if (process == null) return processes;
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var lines = output.Split('\n').Skip(1); // Skip header
+
+        foreach (var line in lines.Take(count))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 11)
+            {
+                processes.Add(new ProcessInfo
+                {
+                    User = parts[0],
+                    Pid = int.Parse(parts[1]),
+                    CpuUsage = double.Parse(parts[2]),
+                    MemoryUsage = double.Parse(parts[3]),
+                    Command = string.Join(" ", parts[10..])
+                });
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error getting process info");
+    }
+
+    return processes;
+}
     public async Task<List<NetworkConnection>> GetNetworkConnectionsAsync()
     {
         var connections = new List<NetworkConnection>();
@@ -258,43 +317,7 @@ public class SystemMonitorService
         return "Unknown";
     }
 
-    public async Task<List<ServiceStatus>> GetServiceStatusAsync()
-    {
-        var services = new List<ServiceStatus>();
-        var serviceNames = new[] { "wsclient.service", "nginx", "postgresql", "mysql", "ssh", "cloudflared" };
-
-        foreach (var serviceName in serviceNames)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "systemctl",
-                    Arguments = $"is-active {serviceName}",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false
-                };
-
-                using var process = Process.Start(psi);
-                if (process != null)
-                {
-                    var status = (await process.StandardOutput.ReadToEndAsync()).Trim();
-                    services.Add(new ServiceStatus
-                    {
-                        Name = serviceName,
-                        Status = status,
-                        IsActive = status == "active"
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking service {Service}", serviceName);
-            }
-        }
-
-        return services;
-    }
+    
 
     public async Task<Dictionary<string, NetworkTraffic>> GetServiceTrafficAsync()
     {

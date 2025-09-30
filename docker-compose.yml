@@ -1,14 +1,9 @@
 services:
   servermonitor:
     build: .
-    ports:
-      - "8080:8080"
+    network_mode: "host"
+    restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - ASPNETCORE_URLS=http://*:8080
+      - ConnectionStrings__MarketDataConnection=Host=localhost;Database=marketdata;Username=postgres;Password=postBlack77;Port=5432
