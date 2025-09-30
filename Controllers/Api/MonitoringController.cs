@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿
+using Microsoft.AspNetCore.Mvc;
 using ServerMonitor.Models;
 using ServerMonitor.Services;
 
@@ -9,10 +10,12 @@ namespace ServerMonitor.Controllers.Api;
 public class MonitoringController : ControllerBase
 {
     private readonly SystemMonitorService _monitorService;
+    private readonly PostgresMonitorService _postgresMonitorService;
 
-    public MonitoringController(SystemMonitorService monitorService)
+    public MonitoringController(SystemMonitorService monitorService, PostgresMonitorService postgresMonitorService)
     {
         _monitorService = monitorService;
+        _postgresMonitorService = postgresMonitorService;
     }
 
     [HttpGet("current")]
@@ -27,22 +30,10 @@ public class MonitoringController : ControllerBase
         return await _monitorService.GetTopProcessesAsync(count);
     }
 
-    [HttpGet("network")]
-    public async Task<ActionResult<List<NetworkConnection>>> GetNetworkConnections()
-    {
-        return await _monitorService.GetNetworkConnectionsAsync();
-    }
-
     [HttpGet("services")]
     public async Task<ActionResult<List<ServiceStatus>>> GetServiceStatus()
     {
         return await _monitorService.GetServiceStatusAsync();
-    }
-
-    [HttpGet("traffic")]
-    public async Task<ActionResult<Dictionary<string, NetworkTraffic>>> GetServiceTraffic()
-    {
-        return await _monitorService.GetServiceTrafficAsync();
     }
 
     [HttpGet("connections/by-service")]
@@ -52,5 +43,30 @@ public class MonitoringController : ControllerBase
         return connections
             .GroupBy(c => c.Service)
             .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    [HttpGet("alerts")]
+    public async Task<ActionResult<List<Alert>>> GetAlerts([FromQuery] bool includeResolved = false)
+    {
+        return new List<Alert>();
+    }
+
+    // PostgreSQL Monitoring Endpoints
+    [HttpGet("postgres/stats")]
+    public async Task<ActionResult<PostgresStats>> GetPostgresStats()
+    {
+        return await _postgresMonitorService.GetPostgresStatsAsync();
+    }
+
+    [HttpGet("postgres/connections")]
+    public async Task<ActionResult<List<DatabaseConnection>>> GetPostgresConnections()
+    {
+        return await _postgresMonitorService.GetActiveConnectionsAsync();
+    }
+
+    [HttpGet("postgres/health")]
+    public async Task<ActionResult<bool>> GetPostgresHealth()
+    {
+        return await _postgresMonitorService.IsDatabaseHealthyAsync();
     }
 }

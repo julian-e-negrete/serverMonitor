@@ -2,6 +2,7 @@ services:
   servermonitor:
     build: .
     network_mode: "host"
+    pid: "host"  # Share host's process namespace
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
