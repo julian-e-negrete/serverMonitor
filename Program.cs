@@ -30,8 +30,12 @@ else
         options.UseNpgsql(serverMonitorConnection));
 }
 
-// Register DbContextFactory for both contexts
-builder.Services.AddDbContextFactory<ApplicationDbContext>();
+// Note: do not register a DbContextFactory as a singleton while also
+// registering DbContext options as scoped. Keep a single scoped DbContext
+// registration and resolve it from scoped services / scopes when needed.
+// The MonitoringBackgroundService resolves ApplicationDbContext from a
+// scope. FinancialDataService is implemented as scoped and will receive
+// ApplicationDbContext via DI.
 
 // Custom services
 builder.Services.AddScoped<SystemMonitorService>();
@@ -97,6 +101,86 @@ using (var scope = app.Services.CreateScope())
             // For development: ensure database is created and migrations are applied
             await db.Database.EnsureCreatedAsync();
             Console.WriteLine("✅ ServerMonitor database initialized");
+
+            // Ensure financial tables exist for Dapper writes (idempotent)
+            // try
+            // {
+            //     // var createSql = @"
+            //     // CREATE TABLE IF NOT EXISTS ""FinancialRecords"" (
+            //     //     ""Id"" SERIAL PRIMARY KEY,
+            //     //     ""Instrument"" VARCHAR(100) NOT NULL,
+            //     //     ""Type"" VARCHAR(50) NOT NULL,
+            //     //     ""Value"" NUMERIC(18,4),
+            //     //     ""Rate"" NUMERIC(18,4),
+            //     //     ""Volume"" NUMERIC(18,4),
+            //     //     ""RecordDate"" TIMESTAMP
+            //     // );
+
+            //     // CREATE TABLE IF NOT EXISTS ""MarketDataRecords"" (
+            //     //     ""Id"" SERIAL PRIMARY KEY,
+            //     //     ""Instrument"" VARCHAR(100) NOT NULL,
+            //     //     ""Time"" TIMESTAMP,
+            //     //     ""BidPrice"" NUMERIC(18,6),
+            //     //     ""AskPrice"" NUMERIC(18,6),
+            //     //     ""LastPrice"" NUMERIC(18,6),
+            //     //     ""TotalVolume"" NUMERIC(18,2)
+            //     // );
+
+            //     // CREATE TABLE IF NOT EXISTS ""MepCalculations"" (
+            //     //     ""Id"" SERIAL PRIMARY KEY,
+            //     //     ""Time"" TIMESTAMP,
+            //     //     ""Al30Price"" NUMERIC(18,6),
+            //     //     ""Al30DPrice"" NUMERIC(18,6),
+            //     //     ""MepRate"" NUMERIC(18,4)
+            //     // );
+            //     // ";
+
+            //     using var conn = db.Database.GetDbConnection();
+            //     await conn.OpenAsync();
+            //     using var cmd = conn.CreateCommand();
+            //     cmd.CommandText = createSql;
+            //     await cmd.ExecuteNonQueryAsync();
+            //     Console.WriteLine("✅ Ensured financial tables exist (FinancialRecords, MarketDataRecords, MepCalculations)");
+            // }
+            // catch (Exception ex)
+            // {
+            //     Console.WriteLine($"⚠️ Could not ensure financial tables: {ex.Message}");
+            // }
+
+            // Execute market table initialization SQL if present (orders, ticks)
+            try
+            {
+                // Prefer the project's content root (works when running from bin/) then fall back
+                var sqlPath = Path.Combine(app.Environment.ContentRootPath, "sql", "init_market_tables.sql");
+                if (!File.Exists(sqlPath))
+                {
+                    // fallback to paths relative to the AppContext base directory
+                    sqlPath = Path.Combine(AppContext.BaseDirectory, "..", "sql", "init_market_tables.sql");
+                    if (!File.Exists(sqlPath))
+                    {
+                        sqlPath = Path.Combine(AppContext.BaseDirectory, "sql", "init_market_tables.sql");
+                    }
+                }
+
+                if (File.Exists(sqlPath))
+                {
+                    var sql = await File.ReadAllTextAsync(sqlPath);
+                    using var conn2 = db.Database.GetDbConnection();
+                    await conn2.OpenAsync();
+                    using var cmd2 = conn2.CreateCommand();
+                    cmd2.CommandText = sql;
+                    await cmd2.ExecuteNonQueryAsync();
+                    Console.WriteLine("✅ Executed market table init SQL (orders, ticks)");
+                }
+                else
+                {
+                    Console.WriteLine($"⚠️ Market init SQL not found at {sqlPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Could not ensure market tables: {ex.Message}");
+            }
         }
     }
     catch (Exception ex)

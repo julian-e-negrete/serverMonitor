@@ -1,27 +1,31 @@
-using Microsoft.EntityFrameworkCore;
-using ServerMonitor.Data;
+using Dapper;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using ServerMonitor.Models;
+using System.Data;
 
 namespace ServerMonitor.Services
 {
     public class FinancialDataService : IFinancialDataService
     {
         private readonly ILogger<FinancialDataService> _logger;
-        private readonly IDbContextFactory<ApplicationDbContext> _contextFactory;
+        private readonly string _connectionString;
 
-        public FinancialDataService(ILogger<FinancialDataService> logger, IDbContextFactory<ApplicationDbContext> contextFactory)
+        public FinancialDataService(ILogger<FinancialDataService> logger, IConfiguration configuration)
         {
             _logger = logger;
-            _contextFactory = contextFactory;
+            _connectionString = configuration.GetConnectionString("DefaultConnection") ?? throw new ArgumentNullException("DefaultConnection");
         }
 
         public async Task SaveMarketDataAsync(MarketDataRecord record)
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                context.MarketDataRecords.Add(record);
-                await context.SaveChangesAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                var sql = @"INSERT INTO ""MarketDataRecords"" (""Time"",""Instrument"",""BidVolume"",""BidPrice"",""AskPrice"",""AskVolume"",""LastPrice"",""TotalVolume"",""Low"",""High"",""PrevClose"",""CreatedAt"")
+                            VALUES (@Time,@Instrument,@BidVolume,@BidPrice,@AskPrice,@AskVolume,@LastPrice,@TotalVolume,@Low,@High,@PrevClose,@CreatedAt);";
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+                await conn.ExecuteAsync(sql, record);
             }
             catch (Exception ex)
             {
@@ -34,23 +38,19 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                
-                // Get latest record for each instrument
                 var instruments = new[] { "bm_MERV_AL30_24hs", "bm_MERV_AL30D_24hs", "rx_DDF_DLR_OCT25", "bm_MERV_PESOS_1D" };
                 var results = new List<MarketDataRecord>();
-                
+
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+
                 foreach (var instrument in instruments)
                 {
-                    var latest = await context.MarketDataRecords
-                        .Where(r => r.Instrument == instrument)
-                        .OrderByDescending(r => r.Time)
-                        .FirstOrDefaultAsync();
-                        
-                    if (latest != null)
-                        results.Add(latest);
+                    var sql = @"SELECT * FROM ""MarketDataRecords"" WHERE ""Instrument"" = @Instrument ORDER BY ""Time"" DESC LIMIT 1";
+                    var latest = await conn.QueryFirstOrDefaultAsync<MarketDataRecord>(sql, new { Instrument = instrument });
+                    if (latest != null) results.Add(latest);
                 }
-                
+
                 return results;
             }
             catch (Exception ex)
@@ -64,11 +64,11 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                return await context.MarketDataRecords
-                    .Where(r => r.Instrument == instrument)
-                    .OrderByDescending(r => r.Time)
-                    .FirstOrDefaultAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+
+                var sql = @"SELECT * FROM ""MarketDataRecords"" WHERE ""Instrument"" = @Instrument ORDER BY ""Time"" DESC LIMIT 1";
+                return await conn.QueryFirstOrDefaultAsync<MarketDataRecord>(sql, new { Instrument = instrument });
             }
             catch (Exception ex)
             {
@@ -81,9 +81,11 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                context.MepCalculations.Add(mepCalculation);
-                await context.SaveChangesAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                var sql = @"INSERT INTO ""MepCalculations"" (""Time"",""Al30Price"",""Al30DPrice"",""MepRate"",""CreatedAt"")
+                            VALUES (@Time,@Al30Price,@Al30DPrice,@MepRate,@CreatedAt);";
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+                await conn.ExecuteAsync(sql, mepCalculation);
             }
             catch (Exception ex)
             {
@@ -96,10 +98,10 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                return await context.MepCalculations
-                    .OrderByDescending(m => m.Time)
-                    .FirstOrDefaultAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+                var sql = @"SELECT * FROM ""MepCalculations"" ORDER BY ""Time"" DESC LIMIT 1";
+                return await conn.QueryFirstOrDefaultAsync<MepCalculation>(sql);
             }
             catch (Exception ex)
             {
@@ -112,12 +114,10 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                return await context.MepCalculations
-                    .Where(m => m.Time >= fromDate && m.Time <= toDate)
-                    .OrderByDescending(m => m.Time)
-                    .Take(maxRecords)
-                    .ToListAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+                var sql = @"SELECT * FROM ""MepCalculations"" WHERE ""Time"" >= @FromDate AND ""Time"" <= @ToDate ORDER BY ""Time"" DESC LIMIT @MaxRecords";
+                return (await conn.QueryAsync<MepCalculation>(sql, new { FromDate = fromDate, ToDate = toDate, MaxRecords = maxRecords })).ToList();
             }
             catch (Exception ex)
             {
@@ -130,24 +130,42 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                
-                var latestRecords = await context.FinancialRecords
-                    .Where(r => r.Type == "Cauction")
-                    .GroupBy(r => r.Instrument)
-                    .Select(g => g.OrderByDescending(r => r.RecordDate).FirstOrDefault())
-                    .ToListAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
 
-                return latestRecords.Where(r => r != null).Select(r => new CauctionData
+                // Read latest tick per instrument and map to CauctionData
+                var sql = @"SELECT DISTINCT ON (instrument) instrument, last_price AS rate, total_volume AS volume, time AS recorddate FROM ticks ORDER BY instrument, time DESC";
+                var latestRecords = (await conn.QueryAsync(sql)).ToList();
+
+                // Map dynamic rows to CauctionData
+                var result = new List<CauctionData>();
+                foreach (var row in latestRecords)
                 {
-                    Description = r.Instrument,
-                    Rate = r.Rate,
-                    Volume = FormatVolume(r.Volume),
-                    RawVolume = (double)r.Volume,
-                    Variation = $"{r.Variation}%",
-                    RawVariation = r.Variation,
-                    Timestamp = r.RecordDate
-                }).ToList();
+                    try
+                    {
+                        string instrument = row.instrument;
+                        decimal rate = row.rate;
+                        long volume = Convert.ToInt64(row.volume);
+                        DateTime timestamp = row.recorddate;
+
+                        result.Add(new CauctionData
+                        {
+                            Description = instrument,
+                            Rate = rate,
+                            Volume = FormatVolume((decimal)volume),
+                            RawVolume = (double)volume,
+                            Variation = "0%",
+                            RawVariation = 0,
+                            Timestamp = timestamp
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Skipping malformed tick row while mapping to CauctionData");
+                    }
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
@@ -160,9 +178,30 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                context.FinancialRecords.AddRange(records);
-                await context.SaveChangesAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+
+                // Map incoming FinancialRecord list into ticks table rows
+                var sql = @"INSERT INTO ticks (""time"", instrument, bid_volume, bid_price, ask_price, ask_volume, last_price, total_volume, low, high, prev_close)
+                            VALUES (@RecordDate, @Instrument, @BidVolume, @BidPrice, @AskPrice, @AskVolume, @LastPrice, @TotalVolume, @Low, @High, @PrevClose)";
+
+                // Convert FinancialRecord to anonymous objects matching the ticks columns
+                var tickRows = records.Select(r => new
+                {
+                    RecordDate = r.RecordDate,
+                    Instrument = r.Instrument,
+                    BidVolume = 0L,
+                    BidPrice = r.Rate,
+                    AskPrice = r.Rate,
+                    AskVolume = 0L,
+                    LastPrice = r.Rate,
+                    TotalVolume = Convert.ToInt64(Math.Floor((double)r.Volume)),
+                    Low = r.Rate,
+                    High = r.Rate,
+                    PrevClose = r.Rate
+                });
+
+                await conn.ExecuteAsync(sql, tickRows);
             }
             catch (Exception ex)
             {
@@ -175,10 +214,19 @@ namespace ServerMonitor.Services
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
-                return await context.MarketDataRecords.AnyAsync() || 
-                       await context.MepCalculations.AnyAsync() || 
-                       await context.FinancialRecords.AnyAsync();
+                await using var conn = new NpgsqlConnection(_connectionString);
+                if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+
+                var marketSql = @"SELECT EXISTS(SELECT 1 FROM orders LIMIT 1)";
+                var marketExists = await conn.ExecuteScalarAsync<bool>(marketSql);
+
+                // MEP is computed on demand; don't require a DB table
+                var mepExists = false;
+
+                var finSql = @"SELECT EXISTS(SELECT 1 FROM ticks LIMIT 1)";
+                var finExists = await conn.ExecuteScalarAsync<bool>(finSql);
+
+                return marketExists || mepExists || finExists;
             }
             catch (Exception ex)
             {
@@ -196,7 +244,7 @@ namespace ServerMonitor.Services
                 return $"{(vol / 1_000_000_000):0.##} billion";
             if (vol >= 1_000_000)
                 return $"{(vol / 1_000_000):0.##} million";
-            
+
             return vol.ToString("N0");
         }
     }

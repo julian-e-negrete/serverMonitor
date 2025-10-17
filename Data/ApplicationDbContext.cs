@@ -92,6 +92,47 @@ namespace ServerMonitor.Data
                     .HasPrecision(18, 4);
             });
 
+            // NetworkConnection is collected from the system. Provide a simple primary key
+            // so EF Core can track and validate the entity when using relational providers
+            modelBuilder.Entity<NetworkConnection>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+
+                // Optional: limit column lengths if ever mapped to a relational provider
+                entity.Property(e => e.Protocol).HasMaxLength(20);
+                entity.Property(e => e.LocalAddress).HasMaxLength(100);
+                entity.Property(e => e.RemoteAddress).HasMaxLength(100);
+                entity.Property(e => e.State).HasMaxLength(50);
+                entity.Property(e => e.Process).HasMaxLength(200);
+                entity.Property(e => e.Service).HasMaxLength(100);
+            });
+
+            // ProcessInfo: use Pid as the natural key when available
+            modelBuilder.Entity<ProcessInfo>(entity =>
+            {
+                entity.HasKey(e => e.Pid);
+                entity.Property(e => e.Name).HasMaxLength(200);
+                entity.Property(e => e.User).HasMaxLength(100);
+                entity.Property(e => e.Command).HasMaxLength(1000);
+            });
+
+            // ServiceStatus: add key configuration
+            modelBuilder.Entity<ServiceStatus>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Name).HasMaxLength(200);
+                entity.Property(e => e.Status).HasMaxLength(100);
+            });
+
+            // Configure ProcessInfo: use Pid as primary key so EF can validate the model
+            modelBuilder.Entity<ProcessInfo>(entity =>
+            {
+                entity.HasKey(e => e.Pid);
+                entity.Property(e => e.Name).HasMaxLength(200);
+                entity.Property(e => e.User).HasMaxLength(100);
+                entity.Property(e => e.Command).HasMaxLength(1000);
+            });
+
             base.OnModelCreating(modelBuilder);
         }
     }

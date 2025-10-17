@@ -6,21 +6,18 @@ namespace ServerMonitor.BackgroundTasks
 {
     public class FinancialDataBackgroundService : BackgroundService
     {
-        private readonly IFinancialDataService _financialDataService;
-        private readonly IMarketApiService _marketApiService;
         private readonly ILogger<FinancialDataBackgroundService> _logger;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
 
+        // Do not inject scoped services (like IFinancialDataService) into the
+        // singleton background service. Instead create a scope and resolve
+        // the scoped services inside the loop.
         public FinancialDataBackgroundService(
-            IFinancialDataService financialDataService,
-            IMarketApiService marketApiService,
             ILogger<FinancialDataBackgroundService> logger,
-            IServiceProvider serviceProvider)
+            IServiceScopeFactory scopeFactory)
         {
-            _financialDataService = financialDataService;
-            _marketApiService = marketApiService;
             _logger = logger;
-            _serviceProvider = serviceProvider;
+            _scopeFactory = scopeFactory;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -31,7 +28,11 @@ namespace ServerMonitor.BackgroundTasks
             {
                 try
                 {
-                    await FetchAndStoreCauctionDataAsync();
+                    using var scope = _scopeFactory.CreateScope();
+                    var marketApi = scope.ServiceProvider.GetRequiredService<IMarketApiService>();
+                    var financialService = scope.ServiceProvider.GetRequiredService<IFinancialDataService>();
+
+                    await FetchAndStoreCauctionDataAsync(marketApi, financialService);
                     await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
                 }
                 catch (Exception ex)
@@ -42,11 +43,11 @@ namespace ServerMonitor.BackgroundTasks
             }
         }
 
-        private async Task FetchAndStoreCauctionDataAsync()
+        private async Task FetchAndStoreCauctionDataAsync(IMarketApiService marketApiService, IFinancialDataService financialDataService)
         {
             try
             {
-                var cauctionData = await _marketApiService.FetchCauctionDataAsync();
+                var cauctionData = await marketApiService.FetchCauctionDataAsync();
 
                 var records = cauctionData.Select(item => new FinancialRecord
                 {
@@ -58,7 +59,7 @@ namespace ServerMonitor.BackgroundTasks
                     RecordDate = DateTime.UtcNow
                 }).ToList();
 
-                await _financialDataService.SaveCauctionDataAsync(records);
+                await financialDataService.SaveCauctionDataAsync(records);
                 _logger.LogInformation("Successfully fetched and stored {Count} cauction records", records.Count);
             }
             catch (Exception ex)

@@ -63,18 +63,18 @@ public class MonitoringBackgroundService : BackgroundService
 
     private async Task CreateAlertAsync(string type, string message, ApplicationDbContext dbContext)
     {
-        var recentAlert = await dbContext.Alerts
-            .Where(a => a.Type == type && !a.IsResolved && a.CreatedAt > DateTime.UtcNow.AddHours(-1))
-            .FirstOrDefaultAsync();
+        // var recentAlert = await dbContext.Alerts
+        //     .Where(a => a.Type == type && !a.IsResolved && a.CreatedAt > DateTime.UtcNow.AddHours(-1))
+        //     .FirstOrDefaultAsync();
 
-        if (recentAlert == null)
-        {
-            dbContext.Alerts.Add(new Alert
-            {
-                Type = type,
-                Message = message,
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+        // if (recentAlert == null)
+        // {
+        //     dbContext.Alerts.Add(new Alert
+        //     {
+        //         Type = type,
+        //         Message = message,
+        //         CreatedAt = DateTime.UtcNow
+        //     });
+        // }
     }
 }
