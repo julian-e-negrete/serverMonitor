@@ -2,6 +2,8 @@
 
 public class NetworkConnection
 {
+    // Primary key for EF Core
+    public int Id { get; set; }
     public string Protocol { get; set; } = string.Empty;
     public string LocalAddress { get; set; } = string.Empty;
     public string RemoteAddress { get; set; } = string.Empty;
